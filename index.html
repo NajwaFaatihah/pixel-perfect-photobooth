@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PiXEL Perfect Math Challenge Photo Booth</title>
+
+  <style>
+    :root {
+      --blue: #081d75;
+      --pink: #ff28d7;
+      --yellow: #ffe600;
+      --cyan: #00eaff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      color: white;
+      font-family: Arial, sans-serif;
+      background:
+        radial-gradient(circle at top, #4022a5, transparent 45%),
+        linear-gradient(135deg, #020625, #081d75 55%, #25004e);
+    }
+
+    .app {
+      width: min(100%, 620px);
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      color: var(--yellow);
+      font-size: clamp(1.4rem, 5vw, 2.2rem);
+    }
+
+    p {
+      margin: 0 0 16px;
+    }
+
+    .camera-box,
+    .result-box {
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border: 3px solid var(--cyan);
+      border-radius: 18px;
+      background: #000;
+      box-shadow: 0 0 24px #00eaffaa;
+    }
+
+    video,
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    #video.front {
+      transform: scaleX(-1);
+    }
+
+    .countdown {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-size: clamp(4rem, 20vw, 9rem);
+      font-weight: 900;
+      text-shadow: 0 0 20px var(--pink), 0 0 40px var(--pink);
+      pointer-events: none;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 13px 18px;
+      color: #07104f;
+      background: var(--yellow);
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 0 12px #ffe60088;
+    }
+
+    button:hover {
+      filter: brightness(1.12);
+    }
+
+    button.secondary {
+      color: white;
+      background: #5422c7;
+      box-shadow: 0 0 12px #a66cff88;
+    }
+
+    button.danger {
+      color: white;
+      background: #d01970;
+      box-shadow: 0 0 12px #ff28d788;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .status {
+      min-height: 24px;
+      margin-top: 14px;
+      color: var(--cyan);
+      font-weight: bold;
+    }
+
+    .result-box {
+      width: min(100%, 400px);
+      aspect-ratio: 2 / 3;
+      margin: 0 auto;
+      border-color: var(--pink);
+      box-shadow: 0 0 24px #ff28d799;
+    }
+
+    #finalCanvas {
+      object-fit: contain;
+      background: #111;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <h1>PiXEL Perfect</h1>
+    <p>Math Challenge Photo Booth · SMK Nenasi</p>
+
+    <section id="cameraSection">
+      <div class="camera-box">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="countdown" class="countdown hidden"></div>
+      </div>
+
+      <div class="buttons">
+        <button id="startButton">START PHOTO BOOTH</button>
+        <button id="switchButton" class="secondary hidden">
+          SWITCH CAMERA
+        </button>
+        <button id="captureButton" class="hidden">
+          CAPTURE
+        </button>
+      </div>
+    </section>
+
+    <section id="resultSection" class="hidden">
+      <div class="result-box">
+        <canvas id="finalCanvas" width="1200" height="1800"></canvas>
+      </div>
+
+      <div class="buttons">
+        <button id="downloadButton">DOWNLOAD PHOTO</button>
+        <button id="retakeButton" class="secondary">RETAKE</button>
+        <button id="againButton" class="danger">START AGAIN</button>
+      </div>
+    </section>
+
+    <div id="status" class="status">
+      Press START PHOTO BOOTH to begin.
+    </div>
+  </main>
+
+  <script>
+    const video = document.getElementById("video");
+    const finalCanvas = document.getElementById("finalCanvas");
+    const finalContext = finalCanvas.getContext("2d");
+
+    const startButton = document.getElementById("startButton");
+    const switchButton = document.getElementById("switchButton");
+    const captureButton = document.getElementById("captureButton");
+    const downloadButton = document.getElementById("downloadButton");
+    const retakeButton = document.getElementById("retakeButton");
+    const againButton = document.getElementById("againButton");
+
+    const cameraSection = document.getElementById("cameraSection");
+    const resultSection = document.getElementById("resultSection");
+    const countdown = document.getElementById("countdown");
+    const status = document.getElementById("status");
+
+    let stream = null;
+    let cameraMode = "environment";
+
+    /*
+      These coordinates describe the transparent photo window
+      in the 1200 x 1800 frame.
+
+      If the photo is slightly outside the window, adjust only
+      these four values. Do not modify the frame artwork.
+    */
+    const PHOTO_WINDOW = {
+      x: 180,
+      y: 590,
+      width: 840,
+      height: 710
+    };
+
+    const frameImage = new Image();
+    frameImage.src = "frame.png";
+
+    function setStatus(message) {
+      status.textContent = message;
+    }
+
+    function wait(milliseconds) {
+      return new Promise(resolve => setTimeout(resolve, milliseconds));
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+
+      video.srcObject = null;
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices ||
+          !navigator.mediaDevices.getUserMedia) {
+        setStatus(
+          "Live camera access is not supported by this browser. " +
+          "Open this page on a supported mobile browser over HTTPS."
+        );
+        return;
+      }
+
+      stopCamera();
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: cameraMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        });
+
+        video.srcObject = stream;
+        video.classList.toggle("front", cameraMode === "user");
+
+        await video.play();
+
+        startButton.classList.add("hidden");
+        switchButton.classList.remove("hidden");
+        captureButton.classList.remove("hidden");
+
+        setStatus("Camera ready. Position yourself inside the frame.");
+      } catch (error) {
+        setStatus(
+          "Camera permission was denied or the camera is unavailable. " +
+          "Please allow camera access and try again."
+        );
+      }
+    }
+
+    async function switchCamera() {
+      cameraMode = cameraMode === "user" ? "environment" : "user";
+      await startCamera();
+    }
+
+    async function runCountdown() {
+      countdown.classList.remove("hidden");
+
+      for (const message of ["3", "2", "1", "SNAP!"]) {
+        countdown.textContent = message;
+        await wait(message === "SNAP!" ? 350 : 850);
+      }
+
+      countdown.classList.add("hidden");
+    }
+
+    function drawImageCover(context, image, x, y, width, height, mirror) {
+      const sourceWidth = image.videoWidth || image.width;
+      const sourceHeight = image.videoHeight || image.height;
+
+      const sourceRatio = sourceWidth / sourceHeight;
+      const targetRatio = width / height;
+
+      let cropWidth = sourceWidth;
+      let cropHeight = sourceHeight;
+      let cropX = 0;
+      let cropY = 0;
+
+      if (sourceRatio > targetRatio) {
+        cropWidth = sourceHeight * targetRatio;
+        cropX = (sourceWidth - cropWidth) / 2;
+      } else {
+        cropHeight = sourceWidth / targetRatio;
+        cropY = (sourceHeight - cropHeight) / 2;
+      }
+
+      context.save();
+
+      if (mirror) {
+        context.translate(x + width, y);
+        context.scale(-1, 1);
+        context.drawImage(
+          image,
+          cropX,
+          cropY,
+          cropWidth,
+          cropHeight,
+          0,
+          0,
+          width,
+          height
+        );
+      } else {
+        context.drawImage(
+          image,
+          cropX,
+          cropY,
+          cropWidth,
+          cropHeight,
+          x,
+          y,
+          width,
+          height
+        );
+      }
+
+      context.restore();
+    }
+
+    async function capturePhoto() {
+      if (!stream || video.readyState < 2) {
+        setStatus("The camera is not ready yet.");
+        return;
+      }
+
+      captureButton.disabled = true;
+      switchButton.disabled = true;
+
+      await runCountdown();
+
+      finalContext.clearRect(0, 0, 1200, 1800);
+
+      drawImageCover(
+        finalContext,
+        video,
+        PHOTO_WINDOW.x,
+        PHOTO_WINDOW.y,
+        PHOTO_WINDOW.width,
+        PHOTO_WINDOW.height,
+        cameraMode === "user"
+      );
+
+      if (!frameImage.complete) {
+        await new Promise(resolve => {
+          frameImage.onload = resolve;
+        });
+      }
+
+      finalContext.drawImage(frameImage, 0, 0, 1200, 1800);
+
+      stopCamera();
+
+      cameraSection.classList.add("hidden");
+      resultSection.classList.remove("hidden");
+
+      setStatus("Photo captured. Preview your PiXEL Perfect photo.");
+      captureButton.disabled = false;
+      switchButton.disabled = false;
+    }
+
+    function downloadPhoto() {
+      finalCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = "pixel-perfect-math-challenge.png";
+        link.click();
+
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    }
+
+    function retakePhoto() {
+      resultSection.classList.add("hidden");
+      cameraSection.classList.remove("hidden");
+      startCamera();
+    }
+
+    function startAgain() {
+      stopCamera();
+
+      resultSection.classList.add("hidden");
+      cameraSection.classList.remove("hidden");
+
+      startButton.classList.remove("hidden");
+      switchButton.classList.add("hidden");
+      captureButton.classList.add("hidden");
+
+      setStatus("Press START PHOTO BOOTH to begin.");
+    }
+
+    startButton.addEventListener("click", startCamera);
+    switchButton.addEventListener("click", switchCamera);
+    captureButton.addEventListener("click", capturePhoto);
+    downloadButton.addEventListener("click", downloadPhoto);
+    retakeButton.addEventListener("click", retakePhoto);
+    againButton.addEventListener("click", startAgain);
+
+    window.addEventListener("pagehide", stopCamera);
+  </script>
+</body>
+</html>
